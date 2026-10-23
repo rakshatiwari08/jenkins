@@ -103,6 +103,19 @@ class BasicHeaderProcessorTest {
         spySecurityListener.failedToAuthenticateCalls.assertLastEventIsAndThenRemoveIt("foo");
     }
 
+    @Test
+    void testBasicAuthHeaderWithExtraWhitespace() throws Exception {
+        j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
+        User foo = User.getOrCreateByIdOrFullName("foo");
+        wc = j.createWebClient();
+
+        String token = foo.getProperty(ApiTokenProperty.class).getApiToken();
+        String authCode = "  BASIC\t" + Base64.getEncoder().encodeToString("foo:".concat(token).getBytes(StandardCharsets.UTF_8));
+
+        makeRequestWithAuthCodeAndVerify(authCode, "foo");
+        spySecurityListener.authenticatedCalls.assertLastEventIsAndThenRemoveIt(u -> u.getUsername().equals("foo"));
+    }
+
     private void makeRequestAndFail() {
         makeRequestWithAuthCodeAndFail(null);
     }
@@ -196,3 +209,4 @@ class BasicHeaderProcessorTest {
     @TestExtension
     public static class SpySecurityListenerImpl extends SpySecurityListener {}
 }
+

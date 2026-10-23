@@ -18,7 +18,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
-import java.util.Locale;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.kohsuke.accmod.Restricted;
@@ -68,43 +67,50 @@ public class BasicHeaderProcessor implements CompatibleFilter {
         HttpServletResponse rsp = (HttpServletResponse) response;
         String authorization = req.getHeader("Authorization");
 
-        if (authorization != null && authorization.toLowerCase(Locale.ROOT).startsWith("Basic ".toLowerCase(Locale.ROOT))) {
-            // authenticate the user
-            String uidpassword = null;
-            try {
-                uidpassword = new String(Base64.getDecoder().decode(authorization.substring(6).getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8);
-            } catch (IllegalArgumentException ex) {
-                LOGGER.log(Level.FINE, ex, () -> "Failed to decode authentication from: " + authorization);
-                uidpassword = "";
-            }
-            int idx = uidpassword.indexOf(':');
-            if (idx >= 0) {
-                String username = uidpassword.substring(0, idx);
-                String password = uidpassword.substring(idx + 1);
-
-                if (!authenticationIsRequired(username)) {
-                    chain.doFilter(request, response);
-                    return;
+        if (authorization != null) {
+            String normalizedAuthorization = authorization.trim();
+            if (normalizedAuthorization.length() > 6
+                    && normalizedAuthorization.regionMatches(true, 0, "Basic", 0, 5)
+                    && Character.isWhitespace(normalizedAuthorization.charAt(5))) {
+                // authenticate the user
+                String uidpassword = null;
+                try {
+                    String credentials = normalizedAuthorization.substring(6).trim();
+                    uidpassword = new String(Base64.getDecoder().decode(credentials.getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException ex) {
+                    LOGGER.log(Level.FINE, ex, () -> "Failed to decode authentication from: " + authorization);
+                    uidpassword = "";
                 }
+                int idx = uidpassword.indexOf(':');
+                if (idx >= 0) {
+                    String username = uidpassword.substring(0, idx);
+                    String password = uidpassword.substring(idx + 1);
 
-                for (BasicHeaderAuthenticator a : all()) {
-                    LOGGER.log(FINER, "Attempting to authenticate with {0}", a);
-                    Authentication auth = a.authenticate2(req, rsp, username, password);
-                    if (auth != null) {
-                        LOGGER.log(FINE, "Request authenticated as {0} by {1}", new Object[]{auth, a});
-                        success(req, rsp, chain, auth);
+                    if (!authenticationIsRequired(username)) {
+                        chain.doFilter(request, response);
                         return;
                     }
-                }
 
-                fail(req, rsp, new BadCredentialsException("Invalid password/token for user: " + username));
-            } else {
-                fail(req, rsp, new BadCredentialsException("Malformed HTTP basic Authorization header"));
+                    for (BasicHeaderAuthenticator a : all()) {
+                        LOGGER.log(FINER, "Attempting to authenticate with {0}", a);
+                        Authentication auth = a.authenticate2(req, rsp, username, password);
+                        if (auth != null) {
+                            LOGGER.log(FINE, "Request authenticated as {0} by {1}", new Object[]{auth, a});
+                            success(req, rsp, chain, auth);
+                            return;
+                        }
+                    }
+
+                    fail(req, rsp, new BadCredentialsException("Invalid password/token for user: " + username));
+                } else {
+                    fail(req, rsp, new BadCredentialsException("Malformed HTTP basic Authorization header"));
+                }
+                return;
             }
-        } else {
-            // not something we care
-            chain.doFilter(request, response);
         }
+
+        // not something we care
+        chain.doFilter(request, response);
     }
 
     /**
@@ -167,3 +173,4 @@ public class BasicHeaderProcessor implements CompatibleFilter {
 
     private static final Logger LOGGER = Logger.getLogger(BasicHeaderProcessor.class.getName());
 }
+
